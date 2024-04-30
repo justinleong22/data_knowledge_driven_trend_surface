@@ -21,7 +21,7 @@ import time
 import warnings
 
 from skimage.morphology import skeletonize
-from numpy.core.umath_tests import inner1d
+# from numpy.core.umath_tests import inner1d
 
 
 # Hausdorff Distance
@@ -43,7 +43,7 @@ def HausdorffDist(A,B):
     # Edward DongBo Cui; Stanford University; 06/17/2014
 
     # Find pairwise distance
-    D_mat = np.sqrt(inner1d(A,A)[np.newaxis].T + inner1d(B,B)-2*(np.dot(A,B.T)))
+    D_mat = np.sqrt(np.inner(A,A)[np.newaxis].T + inner1d(B,B)-2*(np.dot(A,B.T)))
     # Find DH
     dH = np.max(np.array([np.max(np.min(D_mat,axis=0)),np.max(np.min(D_mat,axis=1))]))
     return(dH)
@@ -80,7 +80,7 @@ def ModHausdorffDist(A,B):
     #Edward DongBo Cui Stanford University; 06/17/2014
 
     # Find pairwise distance
-    D_mat = np.sqrt(inner1d(A,A)[np.newaxis].T + inner1d(B,B)-2*(np.dot(A,B.T)))
+    D_mat = np.sqrt(np.inner(A,A)[np.newaxis].T + np.inner(B,B)-2*(np.dot(A,B.T)))
     # Calculating the forward HD: mean(min(each col))
     FHD = np.mean(np.min(D_mat,axis=1))
     # Calculating the reverse HD: mean(min(each row))

@@ -5,8 +5,10 @@ import skfmm
 import numpy as np
 from tqdm import tqdm
 import sys
-path = "/mnt/batch/tasks/shared/LS_root/mounts/clusters/gpu-training2/code/Users/UQ_surface"
-sys.path.append(path) # might change this path
+# path = "/mnt/batch/tasks/shared/LS_root/mounts/clusters/gpu-training2/code/Users/UQ_surface"
+# sys.path.append(path) # might change this path
+
+sys.path.append("../")
 
 from utils.MHD import *
 
