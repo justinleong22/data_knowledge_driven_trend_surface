@@ -8,26 +8,33 @@ import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-def loss_function(model,data): # within class variance
-    loss = np.nanvar(data[model==0])*(np.mean(model==0))+np.nanvar(data[model==1])*np.mean(model==1)
-    return loss
 
-def loss_function_mean_v2_curvature_kl(indicators_x_alpha, phi_x_alpha, phi_x_beta, model, data, reference_curvature, bins=10):
-    loss, O_ik, O_bias, O_var = loss_mean_function_v2(indicators_x_alpha, phi_x_alpha, phi_x_beta, model, data)
+# def loss_function(model,data): # within class variance
+#     loss = np.nanvar(data[model==0])*(np.mean(model==0))+np.nanvar(data[model==1])*np.mean(model==1)
+#     return loss
+
+def loss_function_mean_v2_curvature_kl(indicators_x_alpha, phi_x_alpha, phi_x_beta, model, data, reference_curvature, weight_mean_loss, weight_curvature_loss, bins=10):
+    mean_loss, O_ik, O_bias, O_var = loss_mean_function_v2(indicators_x_alpha, phi_x_alpha, phi_x_beta, model, data)
     curvature_loss, model_curvature = loss_function_curvature_w_kl(model, data, reference_curvature, bins=10)
 
-    mean_loss = O_ik + O_bias + O_var
-
-    weight_mean_loss, weight_curvature_loss = 1/mean_loss, 1/curvature_loss
+    # weight_mean_loss, weight_curvature_loss = 1/mean_loss, 1/curvature_loss
     loss_combined = weight_mean_loss*mean_loss + weight_curvature_loss*curvature_loss
 
     return loss_combined, mean_loss, curvature_loss, O_ik, O_bias, O_var
 
-def loss_function_curvature_w_kl(model, data, reference_curvature, bins=10):
-    # curvature calculation
-    model_curvature = curvature(model)
-    curvature_loss = curvatures_kl(model_curvature, reference_curvature, bins)
+def bin_img_mask(heatmap, threshhold):
+    bin_img = np.zeros_like(heatmap)
+    bin_img[heatmap > threshhold] = 1
+    return bin_img
 
+def loss_function_curvature_w_kl(model, data, reference_curvature, bins=10):
+    # take values 1 std above mean
+    threshold = np.mean(model) + np.std(model)
+    #binarize img
+    bin_img = bin_img_mask(model, threshold)
+    # calculate curvature
+    model_curvature = curvature(bin_img)
+    curvature_loss = curvatures_kl(model_curvature, reference_curvature, bins)
     return curvature_loss, model_curvature
 
 def loss_mean_function_v2(indicators_x_alpha, phi_x_alpha, phi_x_beta, model, data): 
@@ -86,9 +93,9 @@ def generate_m_2D(theta, x, y, seed = None):
     field = srf.structured([x, y]) + theta[0]
     return field 
 
-def McMC_levelsets_2Dv2_curvature(model, data, 
+def McMC_levelsets_2Dv2_curvature(model, data, truth,
                        loss_function=loss_function_mean_v2_curvature_kl,  
-                       sigma = 220, t_step = 0.9, iter_num = 2000, 
+                       hyper_sigma = 0.075, t_step = 0.9, iter_num = 2000, 
                        vel_range_x = [25, 35], vel_range_y = [25, 35],
                        anisotropy_ang = [0, 180],num_mp = 0):
     '''
@@ -113,11 +120,22 @@ def McMC_levelsets_2Dv2_curvature(model, data,
     phi_x_beta_ini = model[data==0.5]
 
     # reference curvature
-    reference_curvature = curvature(model)
+    # this should be the truth!
+    reference_curvature = curvature(truth)
 
     # calculate the loss     
     # new loss using curvature
-    loss_prev, mean_loss, curvature_loss, o_ik_prev, o_bias_prev, o_var_prev = loss_function(indicators_x_alpha, phi_x_alpha_ini, phi_x_beta_ini, model, data, reference_curvature, bins=10)
+    loss_prev, mean_loss, curvature_loss, o_ik_prev, o_bias_prev, o_var_prev = loss_function(indicators_x_alpha, phi_x_alpha_ini, phi_x_beta_ini, model, data, reference_curvature, 1, 1, bins=10)
+    # initialize the weights
+    weight_mean_loss, weight_curvature_loss = 1/mean_loss, 1/curvature_loss
+    loss_prev = weight_mean_loss*mean_loss + weight_curvature_loss*curvature_loss
+
+    sigma = hyper_sigma * loss_prev
+
+    print("sigma: " + str(sigma))
+    print("mean loss: " + str(mean_loss))
+    print("curvature loss: " + str(curvature_loss))
+    print("total_loss:" + str(loss_prev))
 
     for ii in tqdm(np.arange(iter_num)):
 
@@ -157,11 +175,12 @@ def McMC_levelsets_2Dv2_curvature(model, data,
             phi_x_alpha_next = model_next[np.isfinite(data)]
             # signed dist at contact locations x_beta
             phi_x_beta_next = model_next[data==0.5] 
-            # new curvature
-            new_curvature = curvature(model_next)   
+
             ## loss function
-            loss_next, mean_loss, curvature_loss, o_ik_prev, o_bias_prev, o_var_prev =  loss_function(indicators_x_alpha, phi_x_alpha_ini, phi_x_beta_ini, model, data, reference_curvature, bins=10)    
+            loss_next, mean_loss, curvature_loss, o_ik_prev, o_bias_prev, o_var_prev =  loss_function(indicators_x_alpha, phi_x_alpha_next, phi_x_beta_next, model_next, data, reference_curvature, weight_mean_loss, weight_curvature_loss, bins=10)    
         
+            # loss_next = weight_mean_loss*mean_loss + weight_curvature_loss*curvature_loss
+
             # acceptance ratio, alpha 
             alpha = min(1,np.exp((loss_prev**2-loss_next**2)/(sigma**2)))
             u = np.random.uniform(0, 1)
@@ -366,6 +385,21 @@ def mp_non_stationary_implicit_2D(args):
     np.save(path+'results/Case2_intrusion/'+str(num_mp)+'_para_cache.npy',para_cache)
     return
 
+def mp_non_stationary_implicit_2D_w_curvature(args):
+    [model, data, truth, loss_function, sigma, t_step, iter_num, vel_range_x, vel_range_y,anisotropy_ang, num_mp] = args
+    
+    [model_cache, loss_cache, para_cache] = McMC_levelsets_2Dv2_curvature(model, data, truth,
+                                                               loss_function,  
+                                                                sigma, t_step, iter_num, 
+                                                                vel_range_x, vel_range_y,
+                                                                anisotropy_ang,num_mp)
+    # changed to trend
+    np.save(path+'results/Case2_intrusion/'+str(num_mp)+'_trend_cache.npy',model_cache)
+    np.save(path+'results/Case2_intrusion/'+str(num_mp)+'_loss_cache.npy',loss_cache)
+    np.save(path+'results/Case2_intrusion/'+str(num_mp)+'_para_cache.npy',para_cache)
+    return
+
+
 # Gravity inversion github
 
 def countour_extrct(indi_array):
@@ -414,10 +448,10 @@ def calculateContourCurvature(contourPixels):
         if contourCurvature[i] > 1.0:
             contourCurvature[i] = 1.0            
     
-    # # Since the contour points may not be integers, make sure they are
-    # if type(contourPixels[0, 0]) is not int:
-    #     contourPixels = [[int(round(pt[1])), int(round(pt[0]))] for pt in contourPixels]
-    # contourCurvature[np.isnan(contourCurvature)] = 0
+    # Since the contour points may not be integers, make sure they are
+    if type(contourPixels[0, 0]) is not int:
+         contourPixels = [[int(round(pt[1])), int(round(pt[0]))] for pt in contourPixels]
+    contourCurvature[np.isnan(contourCurvature)] = 0
     return contourCurvature, contourPixels
 
 def curvature(model_2d):
